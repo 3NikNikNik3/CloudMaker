@@ -1,0 +1,13 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+      - "9000:8999"
+    volumes:
+      - ./data:/api/data
+    devices:
+      - /dev/kvm:/dev/kvm
+    environment:
+      MAX_MEM: 6144
+      MAX_CPU: 4
