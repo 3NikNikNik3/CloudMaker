@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
 	try:
 		procy = Procy(
 			subprocess.Popen(['socat', 'TCP-LISTEN:8999,reuseaddr,fork', 'TCP:127.0.0.1:9000']),
-			9000
+			0
 		)
 	except Exception as e:
 		print('Error:', e)
@@ -249,7 +249,6 @@ async def get_dists():
 @app.delete('/disk')
 async def delete_disk(what: Annotated[str, Form()]):
 	if not is_ok_path(what) or not os.path.exists('data/' + what) or not os.path.exists('data/' + what + '.desc'):
-		print(is_ok_path(what), os.path.exists('data/' + what), os.path.exists('data/' + what + '.desc'))
 		return HTTPException(400, "I don't have this disk ._.")
 
 	try:
@@ -306,7 +305,7 @@ def copy_disk(data: Annotated[CopyData, Form()]):
 
 @app.get('/connect')
 def get_connect_vm():
-	return procy.port - 9000
+	return procy.port
 
 @app.put('/connect')
 def set_connect(id: Annotated[int, Form()]):
