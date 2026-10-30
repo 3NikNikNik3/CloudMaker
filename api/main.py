@@ -45,6 +45,8 @@ procy = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 	global procy
+	global MAXMEM, MAXCPU
+
 	try:
 		procy = Procy(
 			subprocess.Popen(['socat', 'TCP-LISTEN:8999,reuseaddr,fork', 'TCP:127.0.0.1:9000']),
@@ -83,12 +85,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-def is_ok_path(path: str):
+def is_ok_path(path: str) -> bool:
 	if '../' in path or '/..' in path:
 		return False
 
 	for i in path:
-		if not (i.isalpha() or i.isnumeric() or i == '.' or i == '_' or i == ' '):
+		if not (i.isalpha() or i.isnumeric() or i == '.' or i == '_' or i == ' ' or i == '-'):
 			return False
 	return True
 
@@ -99,6 +101,11 @@ def updata_vm(i: int):
 		use_mem -= vms[i].mem
 		use_cpu -= vms[i].cpu
 		vms[i].run = False
+
+def name_to_path(disk: str) -> str:
+	if len(disk) < 5 or disk[-5:] != '.qcow2':
+		return disk + '.qcow2'
+	return disk
 
 
 # VM
@@ -131,6 +138,8 @@ async def create_vm(how: Annotated[CreateVm, Form()]):
 		raise HTTPException(400, "Too big mem or cpu need")
 
 	# check disk
+	how.disk = name_to_path(how.disk)
+
 	if not is_ok_path(how.disk) or not os.path.exists('data/' + how.disk) or not os.path.exists('data/' + how.disk + '.desc'):
 		raise HTTPException(404, "I don't have this disk")
 
@@ -150,7 +159,7 @@ async def create_vm(how: Annotated[CreateVm, Form()]):
 				"-smp", str(how.cpu),
 				"-nographic",
 				"-enable-kvm",
-				"-drive", "file=data/" + how.disk,
+				"-drive", "file=data/" + how.disk + ",format=qcow2",
 				"-nic", f"user,hostfwd=tcp::{9000 + id}-:22"
 			], stdout=subprocess.DEVNULL),
 			mem, how.cpu, how.disk,
@@ -184,21 +193,27 @@ async def delete_vm(how: Annotated[HowDelete, Form()]):
 
 	return 'I send'
 
-@app.get('/vm')
+class InfoVm(BaseModel):
+	id: int
+	mem: int
+	cpu: int
+	disk: str
+
+class InfoVms(BaseModel):
+	arr: list[InfoVm]
+	use_mem: int
+	use_cpu: int
+
+@app.get('/vm', response_model=InfoVms)
 async def info_vms():
-	arr = ''
+	arr = []
 
 	for i in range(len(vms)):
 		updata_vm(i)
 		if vms[i].run:
-			arr += '{' + \
-				f'"id":{i},' + \
-				f'"mem":{vms[i].mem},' + \
-				f'"cpu":{vms[i].cpu},' + \
-				f'"disk":{vms[i].disk}' + \
-			'},'
+			arr.append(InfoVm(id=i, mem=vms[i].mem, cpu=vms[i].cpu, disk=vms[i].disk))
 
-	return '{"arr": [' + arr[:-1] + ']' + f', "use_mem": {use_mem}, "use_cpu": {use_cpu}' + '}'
+	return InfoVms(arr=arr, use_mem=use_mem, use_cpu=use_cpu)
 
 
 # disk
@@ -208,12 +223,11 @@ class DiskData(BaseModel):
 	desc: str
 
 @app.post('/disk')
-async def load_disk(file: Annotated[UploadFile, File()], data: Annotated[DiskData, Form()]):
-	if len(data.name) < 6 or data.name[-6:] != '.qcow2':
-		return HTTPException(400, "Please, give disk formated .qcow2")
+async def load_disk(data: Annotated[DiskData, Form()], file: Annotated[UploadFile, File()]):
+	data.name = name_to_path(data.name)
 
-	if data.name == '' or not is_ok_path(data.name):
-		return HTTPException(400, "Bad name, only alpha, number, ., _ and space")
+	if not is_ok_path(data.name):
+		raise HTTPException(400, "Bad name, only alpha, number, ., _, - and space")
 
 	try:
 		with open(f'data/{data.name}', 'wb') as fd:
@@ -222,7 +236,7 @@ async def load_disk(file: Annotated[UploadFile, File()], data: Annotated[DiskDat
 	except:
 		os.system(f'rm /data/{data.name}')
 
-		return HTTPException(500, "Cann't load disk :(")
+		raise HTTPException(500, "Cann't load disk :(")
 
 	await file.close()
 
@@ -231,38 +245,45 @@ async def load_disk(file: Annotated[UploadFile, File()], data: Annotated[DiskDat
 
 	return "All load"
 
-@app.get('/disk')
+class InfoDisk(BaseModel):
+	name: str
+	desc: str
+
+class InfoDisks(BaseModel):
+	arr: list[InfoDisk]
+
+@app.get('/disk', response_model=InfoDisks)
 async def get_dists():
-	ans = ''
+	ans = []
 
 	for i in os.listdir('data/'):
 		if len(i) >= 5 and i[-5:] == '.desc' and os.path.exists('data/' + i[:-5]):
-			ans += '{"name":"' + i[:-5] + '","desc":"'
-
 			with open('data/' + i, 'r') as file:
-				ans += file.read()
+				ans.append(InfoDisk(name=i[:-5], desc=file.read()))
 
-			ans += '"},'
-
-	return '{"arr":[' + ans[:-1] + ']}'
+	return InfoDisks(arr=ans)
 
 @app.delete('/disk')
 async def delete_disk(what: Annotated[str, Form()]):
+	what = name_to_path(what)
+
 	if not is_ok_path(what) or not os.path.exists('data/' + what) or not os.path.exists('data/' + what + '.desc'):
-		return HTTPException(400, "I don't have this disk ._.")
+		raise HTTPException(400, "I don't have this disk ._.")
 
 	try:
 		os.system(f'rm data/{what}')
 		os.system(f'rm data/{what}.desc')
 	except:
-		return HTTPException(500, "Strange, I can not...")
+		raise HTTPException(500, "Strange, I can not...")
 
 	return 'All!'
 
-@app.get('/disk/download/{path}')
-def download_disk(path: str):
+@app.get('/disk/download')
+def download_disk(path: Annotated[str, Form()]):
+	path = name_to_path(path)
+
 	if not is_ok_path(path) or not os.path.exists(f'data/{path}.desc'):
-		return HTTPException(404, "I don't have this disk")
+		raise HTTPException(404, "I don't have this disk")
 
 	return FileResponse(path='data/' + path, filename=path, media_type="application/octet-stream")
 
@@ -273,20 +294,23 @@ class CopyData(BaseModel):
 
 @app.post('/disk/copy')
 def copy_disk(data: Annotated[CopyData, Form()]):
+	data.from_ = name_to_path(data.from_)
+	data.to = name_to_path(data.to)
+
 	if not is_ok_path(data.from_) or not is_ok_path(data.to):
-		return HTTPException(400, "Please, use real path")
+		raise HTTPException(400, "Please, use real path")
 
 	if not os.path.exists('data/' + data.from_) or not os.path.exists('data/' + data.from_ + '.desc'):
-		return HTTPException(404, "I don't have disk on \"from\"")
+		raise HTTPException(404, "I don't have disk on \"from\"")
 
 	if os.path.exists('data/' + data.to):
-		return HTTPException(400, "I have disk on \"to\"")
+		raise HTTPException(400, "I have disk on \"to\"")
 
 	try:
 		os.system(f'cp data/{data.from_} data/{data.to}')
 	except Exception as e:
 		print('Error:', e)
-		return HTTPException(500, "I can't ._.")
+		raise HTTPException(500, "I can't ._.")
 
 	try:
 		with open(f'data/{data.to}.desc', 'w') as file:
@@ -296,7 +320,7 @@ def copy_disk(data: Annotated[CopyData, Form()]):
 
 		os.system(f'rm data/{data.to}')
 		os.system(f'rm data/{data.to}.desc')
-		return HTTPException(500, "I can't ._.")
+		raise HTTPException(500, "I can't ._.")
 
 	return "Complete"
 
@@ -304,17 +328,17 @@ def copy_disk(data: Annotated[CopyData, Form()]):
 # connect (port)
 
 @app.get('/connect')
-def get_connect_vm():
+def get_connect_vm() -> int:
 	return procy.port
 
 @app.put('/connect')
 def set_connect(id: Annotated[int, Form()]):
 	if id < 0 or id >= len(vms):
-		return HTTPException(400, "id from 0 to count of vm")
+		raise HTTPException(400, "id from 0 to count of vm")
 
 	updata_vm(id)
 	if not vms[id].run:
-		return HTTPException(404, "I don't have vm with id=" + str(id))
+		raise HTTPException(404, "I don't have vm with id=" + str(id))
 
 	try:
 		procy.proc.send_signal(signal.SIGINT)

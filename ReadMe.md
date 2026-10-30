@@ -82,12 +82,14 @@ CloudMaker - проект, сделанный для выполнения 1-ог
 	{
 		mem = "1G",
 		cpu = 1,
-		disk = "disk.qcow2"
+		disk = "disk"
 	}
+
+	curl localhost:8000/vm -X POST -d "mem=1G&cpu=1&disk=disk"
 
 Это создаст виртуальную машину с 1Гиб оперативной памяти и 1 ядром cpu с подключённым `disk.qcow2` (он предустановлен)
 
-Должно вернуть {"id": 0} - номер созданной ВМ
+Должно вернуть `{"id": 0}` - номер созданной ВМ
 
 Нельзя запустить ВМ с диском, который уже используется! И ещё есть лимит на RAM и CPU
 
@@ -98,6 +100,8 @@ CloudMaker - проект, сделанный для выполнения 1-ог
 	/vm get
 	{
 	}
+
+	curl localhost:8000/vm
 
 Вы получите примерно
 
@@ -122,6 +126,8 @@ CloudMaker - проект, сделанный для выполнения 1-ог
 		id = 0,
 		kill = false
 	}
+
+	curl localhost:8000/vm -X DELETE -d "id=0&kill=false"
 
 Если `kill = false`, программа "попросит" ВМ остановиться (`SIGINT`), иначе она её жёстко остановит (`SIGKILL`). Последнее рекомендуется использовать лишь в крайних случаях!
 
@@ -152,6 +158,8 @@ CloudMaker - проект, сделанный для выполнения 1-ог
 		id = 1
 	}
 
+	curl localhost:8000/connect -X PUT -d "id=1"
+
 Теперь `ssh user@localhost -p 9000` должен работать
 
 *пароль для `disk.qcow2` `P@ssw0rd`*
@@ -163,6 +171,8 @@ CloudMaker - проект, сделанный для выполнения 1-ог
 	/connect get
 	{
 	}
+
+	curl localhost:8000/connect
 
 Получим примерно `1`
 
@@ -179,6 +189,8 @@ CloudMaker - проект, сделанный для выполнения 1-ог
 	/disk get
 	{
 	}
+
+	curl localhost:8000/disk
 
 Получите примерно:
 
@@ -197,15 +209,14 @@ CloudMaker - проект, сделанный для выполнения 1-ог
 
 Чтобы выгрузить диск с сервера:
 
-	/disk/download/disk.qcow2 get
+	/disk/download get
 	{
+		path = disk
 	}
 
-Вместо `disk.qcow2` можно подставить любое другое имя диска, который Вы хотите выгрузить
+	curl localhost:8000/disk/download -X GET -d "path=disk" --output disk.qcow2
 
-Собственно, если используете `curl`, то нужно ещё указать куда его сохранить, т.е.
-
-	curl localhost:8000/disk/download/disk.qcow2 --output disk.qcow2
+Вместо `disk` можно подставить любое другое имя диска, который Вы хотите выгрузить
 
 ### Загрузка
 
@@ -213,10 +224,12 @@ CloudMaker - проект, сделанный для выполнения 1-ог
 
 	/disk post
 	{
-		name = "test.qcow2",
+		name = "test",
 		desc = "test disk",
 		file = "@disk.qcow2"
 	}
+
+	curl localhost:8000/disk -X POST -F "name=test" -F "desc=test disk" -F "file=@disk.qcow2" -H "Content-Type: multipart/form-data"
 
 `name` - новое имя диска на сервере, `desc` - его описание, а `file` - в `/docs`: будет предложено загрузить файл, а через `curl`: нужно указать путь, начав с `@`
 
@@ -226,8 +239,10 @@ CloudMaker - проект, сделанный для выполнения 1-ог
 
 	/disk delete
 	{
-		what = "test.qcow2"
+		what = "test"
 	}
+
+	curl localhost:8000/disk -X DELETE -d "what=test"
 
 Учтите, что диск удаляется безвозвратно!
 
@@ -237,10 +252,12 @@ CloudMaker - проект, сделанный для выполнения 1-ог
 
 	/disk/copy post
 	{
-		from_ = "disk.qcow2",
-		to = "test.qcow2",
+		from_ = "disk",
+		to = "test",
 		new_desc = "test disk again"
 	}
+
+	curl localhost:8000/disk/copy -X POST -d "from_=disk&to=test&new_desc=test disk again"
 
 Учтите, что перезаписывать таким образом диски нельзя!
 
